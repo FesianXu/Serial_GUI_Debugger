@@ -22,7 +22,7 @@ function varargout = serial_gui(varargin)
 
 % Edit the above text to modify the response to help test
 
-% Last Modified by GUIDE v2.5 10-Mar-2017 18:17:05
+% Last Modified by GUIDE v2.5 10-Mar-2017 23:55:16
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 1;
@@ -60,6 +60,12 @@ global var_names % variable's names
 global csv_file_name % generated csv file's name
 global isSpecifyVarName 
 global isSpecifyCSVName
+global data_mat % data matrix, in order to save int .mat files and csv files
+global isFFT 
+global origin_plot_counter 
+global fft_plot_counter
+global origin_plot_buffer
+global isOrigin_buffer_init
 % global sendingData % ready to sending data
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -72,8 +78,17 @@ function test_OpeningFcn(hObject, eventdata, handles, varargin)
 % varargin   command line arguments to test (see VARARGIN)
 global isSpecifyVarName 
 global isSpecifyCSVName
+global isFFT
+global origin_plot_counter 
+global fft_plot_counter
+global isOrigin_buffer_init
 isSpecifyCSVName = false ;
 isSpecifyVarName = false ;
+isFFT = false ;
+origin_plot_counter = 0 ;
+fft_plot_counter = 0 ;
+isOrigin_buffer_init = false ;
+clc
 
 % Choose default command line output for test
 handles.output = hObject;
@@ -152,20 +167,21 @@ global COM_PORT
 global COM_RATE
 global s_handler
 clc
-instrreset  % isconnect and delete all instrument objects
+instrreset  % inconnect and delete all instrument objects
 s_handler = serial(COM_PORT) ;
 set(s_handler, 'BaudRate', COM_RATE) ;
-set(s_handler,'DataBits',8);%%%  
-set(s_handler,'StopBits',1);%%%  
-set(s_handler,'InputBufferSize',1024000);%%% 
-set(handles.pbOpenPort,'Enable','off');  
-set(handles.pbClosePort,'Enable','on');  
+set(s_handler,'DataBits',8);%%%
+set(s_handler,'StopBits',1);%%%
+set(s_handler,'InputBufferSize',1024000);%%%
+set(handles.pbOpenPort,'Enable','off');
+set(handles.pbClosePort,'Enable','on');
 s_handler.BytesAvailableFcnMode = 'terminator' ;
-s_handler.BytesAvailableFcnCount = 10; 
-s_handler.BytesAvailableFcn={@EveBytesAvailableFcn,handles};  
+s_handler.BytesAvailableFcnCount = 10;
+s_handler.BytesAvailableFcn={@EveBytesAvailableFcn,handles};
 fopen(s_handler) ;
-display('open the serial port') ;
-
+display('open the serial port now') ;
+% open the port now, we need to save the port number and baud rate into a
+% file in convenience to reload them before next usage
 
 
 function extractPacketVarNames(var_contents)
@@ -200,15 +216,50 @@ global rev_data_counter
 global isSpecifyVarName 
 global isSpecifyCSVName
 global var_names
+global csv_file_name
+global isCreateCSVFiles
+global origin_plot_buffer
+global isOrigin_buffer_init 
+global origin_plot_counter 
+
+buf_size = 300 ;
 rev_text = fscanf(s_handler) ;
 rev_data_counter = rev_data_counter+1 ;
-inform{length(inform)+1} = rev_text ;
-set(handles.rev_list, 'string', inform) ;
-set(handles.rev_list,'ListboxTop', rev_data_counter) ;
+% inform{length(inform)+1} = rev_text ;
+% set(handles.rev_list, 'string', inform) ;
+% set(handles.rev_list,'ListboxTop', rev_data_counter) ;
 % show data receive buffer in listbox
 count = ['rev count = ', num2str(rev_data_counter)] ;
 set(handles.rev_count_text, 'string', char(count)) ;
 % show how many data packets i have received yet
+if isOrigin_buffer_init == false
+    isOrigin_buffer_init = true ;
+    origin_plot_buffer = zeros(buf_size, length(var_names)) ; % init the buffer 
+end
+
+if isSpecifyVarName == true && isSpecifyCSVName == true
+    cmd_data_name = 'data' ;
+    data_str = rev_text(length(cmd_data_name)+1:end) ;
+    data_vector = zeros(1,length(var_names)) ;
+    data_cell = regexp(data_str,'\d*\.?\d*','match') ;
+    len_cell = length(data_cell) ;
+    for i = 1:length(len_cell)+1 % why plus 1 ? i dont know but seems right
+        data_vector(i) = str2double(data_cell{i}) ;
+    end
+    if origin_plot_counter < buf_size
+        origin_plot_counter = origin_plot_counter+1 ;
+        origin_plot_buffer(origin_plot_counter,:) = data_vector ; 
+        if origin_plot_counter == buf_size
+            origin_plot_counter = 0 ;
+            x = origin_plot_buffer(:,1) ;
+            y = origin_plot_buffer(:,2) ;
+            plot(handles.origin_axes,x, y) ;
+            set(handles.origin_axes, 'XGrid','on')
+            set(handles.origin_axes, 'YGrid','on')
+        end
+    end
+end
+
 if isSpecifyVarName == false
     cmd_specify_name = 'cmd-specify' ;
     cmd_specify_flag = strfind(rev_text, cmd_specify_name) ;
@@ -226,12 +277,22 @@ if isSpecifyVarName == false
     end
 end % get var names and show it in Command Format
 if isSpecifyCSVName == false
-    cmd_csv_flag = strfind(rev_text, 'cmd-csv') ;
+    cmd_csv_name = 'cmd-csv' ;
+    cmd_csv_flag = strfind(rev_text, cmd_csv_name) ;
     if cmd_csv_flag >= 1
-        
+        csv_contents = rev_text(length(cmd_csv_name)+1:end) ;
+        loc_1 = strfind(csv_contents, '"') ;
+        new_str = csv_contents(loc_1+1:end) ;
+        loc_2 = strfind(new_str, '"') ;
+        csv_file_name = new_str(1:loc_2-1) ;
         isSpecifyCSVName = true ;
+        csv_show_name = ['data save as csv file, named = ',csv_file_name,'.csv'] ;
+        set(handles.csv_name_text, 'string', csv_show_name) ;
     end
 end % get csv files name and save it to create csv file 
+
+
+
 
 
 % --- Executes on button press in pbClosePort.
@@ -369,12 +430,12 @@ end
 
 
 % --- Executes during object creation, after setting all properties.
-function Axes_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to Axes (see GCBO)
+function origin_axes_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to origin_axes (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    empty - handles not created until after all CreateFcns called
 
-% Hint: place code in OpeningFcn to populate Axes
+% Hint: place code in OpeningFcn to populate origin_axes
 
 
 % --- Executes on button press in r_button.
@@ -568,3 +629,10 @@ buffer_size = 0 ;
 if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
     set(hObject,'BackgroundColor','white');
 end
+
+
+% --- Executes during object creation, after setting all properties.
+function csv_name_text_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to csv_name_text (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
