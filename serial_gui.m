@@ -172,7 +172,7 @@ s_handler = serial(COM_PORT) ;
 set(s_handler, 'BaudRate', COM_RATE) ;
 set(s_handler,'DataBits',8);%%%
 set(s_handler,'StopBits',1);%%%
-set(s_handler,'InputBufferSize',1024000);%%%
+set(s_handler,'InputBufferSize',10240000);%%%
 set(handles.pbOpenPort,'Enable','off');
 set(handles.pbClosePort,'Enable','on');
 s_handler.BytesAvailableFcnMode = 'terminator' ;
@@ -222,7 +222,7 @@ global origin_plot_buffer
 global isOrigin_buffer_init 
 global origin_plot_counter 
 
-buf_size = 300 ;
+buf_size = 1024 ;
 rev_text = fscanf(s_handler) ;
 rev_data_counter = rev_data_counter+1 ;
 % inform{length(inform)+1} = rev_text ;
@@ -256,6 +256,10 @@ if isSpecifyVarName == true && isSpecifyCSVName == true
             plot(handles.origin_axes,x, y) ;
             set(handles.origin_axes, 'XGrid','on')
             set(handles.origin_axes, 'YGrid','on')
+            fft_y = fftshift(abs(fft(y, 1024))) ;
+            plot(handles.fft_axes,1:1024, mapminmax(fft_y,0,1)) ;
+            set(handles.fft_axes, 'XGrid','on')
+            set(handles.fft_axes, 'YGrid','on')
         end
     end
 end
@@ -290,9 +294,6 @@ if isSpecifyCSVName == false
         set(handles.csv_name_text, 'string', csv_show_name) ;
     end
 end % get csv files name and save it to create csv file 
-
-
-
 
 
 % --- Executes on button press in pbClosePort.
@@ -364,7 +365,7 @@ switch val
     case 1
         COM_RATE = -1 ;
     case 2
-        COM_RATE = 9600 ;
+        COM_RATE = 128000 ;
     case 3
         COM_RATE = 14400 ;
     case 4
