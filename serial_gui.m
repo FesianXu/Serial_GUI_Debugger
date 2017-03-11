@@ -22,7 +22,7 @@ function varargout = serial_gui(varargin)
 
 % Edit the above text to modify the response to help test
 
-% Last Modified by GUIDE v2.5 10-Mar-2017 23:55:16
+% Last Modified by GUIDE v2.5 11-Mar-2017 10:42:55
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 1;
@@ -51,23 +51,19 @@ global s_handler % the handle of serial port
 global sending_text % the text ready to send
 global isSendingNewLine % is sending new line or not
 global rev_text % receive text
-global inform % new receive data need to be show
 global rev_data_counter % how many data i have received yet
 global send_data_counter % how mant data i have sent yet
-global isCreateCSVFiles % 
 global buffer_size % fft buffer sizes
 global var_names % variable's names
-global csv_file_name % generated csv file's name
-global isSpecifyVarName 
-global isSpecifyCSVName
 global data_mat % data matrix, in order to save int .mat files and csv files
 global isFFT 
 global origin_plot_counter 
 global fft_plot_counter
 global origin_plot_buffer
 global isOrigin_buffer_init
-% global sendingData % ready to sending data
-
+global SerialInputBufferSize
+global cmd_specify_fmt
+global csv_file_name
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % --- Executes just before test is made visible.
 function test_OpeningFcn(hObject, eventdata, handles, varargin)
@@ -76,19 +72,19 @@ function test_OpeningFcn(hObject, eventdata, handles, varargin)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 % varargin   command line arguments to test (see VARARGIN)
-global isSpecifyVarName 
-global isSpecifyCSVName
 global isFFT
 global origin_plot_counter 
 global fft_plot_counter
 global isOrigin_buffer_init
-isSpecifyCSVName = false ;
-isSpecifyVarName = false ;
+global rev_data_counter
+rev_data_counter = 0 ;
 isFFT = false ;
 origin_plot_counter = 0 ;
 fft_plot_counter = 0 ;
 isOrigin_buffer_init = false ;
-clc
+global SerialInputBufferSize
+SerialInputBufferSize = 10240000 ;
+% clc
 
 % Choose default command line output for test
 handles.output = hObject;
@@ -166,13 +162,17 @@ function pbOpenPort_Callback(hObject, eventdata, handles)
 global COM_PORT
 global COM_RATE
 global s_handler
+global SerialInputBufferSize
+global cmd_specify_fmt
+global cmd_specify_edit
+global var_names
 clc
 instrreset  % inconnect and delete all instrument objects
 s_handler = serial(COM_PORT) ;
 set(s_handler, 'BaudRate', COM_RATE) ;
 set(s_handler,'DataBits',8);%%%
 set(s_handler,'StopBits',1);%%%
-set(s_handler,'InputBufferSize',10240000);%%%
+set(s_handler,'InputBufferSize',SerialInputBufferSize);%%%
 set(handles.pbOpenPort,'Enable','off');
 set(handles.pbClosePort,'Enable','on');
 s_handler.BytesAvailableFcnMode = 'terminator' ;
@@ -180,9 +180,14 @@ s_handler.BytesAvailableFcnCount = 10;
 s_handler.BytesAvailableFcn={@EveBytesAvailableFcn,handles};
 fopen(s_handler) ;
 display('open the serial port now') ;
-% open the port now, we need to save the port number and baud rate into a
-% file in convenience to reload them before next usage
-
+% parse var fmt
+cmd_specify_name = 'cmd-specify' ;
+cmd_specify_edit = get(handles.cmd_specify_edit, 'String') ;
+cmd_specify_flag = strfind(cmd_specify_edit, cmd_specify_name) ;
+if cmd_specify_flag >= 1
+    specify_contents = cmd_specify_edit(length(cmd_specify_name)+1:end) ;
+    extractPacketVarNames(specify_contents) ;
+end
 
 function extractPacketVarNames(var_contents)
 global var_names
@@ -211,89 +216,48 @@ end
 function EveBytesAvailableFcn( t,event,handles )
 global s_handler 
 global rev_text
-global inform
 global rev_data_counter
-global isSpecifyVarName 
-global isSpecifyCSVName
 global var_names
-global csv_file_name
-global isCreateCSVFiles
 global origin_plot_buffer
 global isOrigin_buffer_init 
 global origin_plot_counter 
-
-buf_size = 1024 ;
+global buffer_size
+buffer_size = get(handles.buf_edit, 'string') ;
+buf_size = str2double(buffer_size) ;
 rev_text = fscanf(s_handler) ;
 rev_data_counter = rev_data_counter+1 ;
-% inform{length(inform)+1} = rev_text ;
-% set(handles.rev_list, 'string', inform) ;
-% set(handles.rev_list,'ListboxTop', rev_data_counter) ;
-% show data receive buffer in listbox
 count = ['rev count = ', num2str(rev_data_counter)] ;
-set(handles.rev_count_text, 'string', char(count)) ;
+set(handles.rev_count_text, 'string', count) ;
 % show how many data packets i have received yet
 if isOrigin_buffer_init == false
     isOrigin_buffer_init = true ;
     origin_plot_buffer = zeros(buf_size, length(var_names)) ; % init the buffer 
-end
+end % judge whether have been initiated yet or not
 
-if isSpecifyVarName == true && isSpecifyCSVName == true
-    cmd_data_name = 'data' ;
-    data_str = rev_text(length(cmd_data_name)+1:end) ;
-    data_vector = zeros(1,length(var_names)) ;
-    data_cell = regexp(data_str,'\d*\.?\d*','match') ;
-    len_cell = length(data_cell) ;
-    for i = 1:length(len_cell)+1 % why plus 1 ? i dont know but seems right
-        data_vector(i) = str2double(data_cell{i}) ;
-    end
-    if origin_plot_counter < buf_size
-        origin_plot_counter = origin_plot_counter+1 ;
-        origin_plot_buffer(origin_plot_counter,:) = data_vector ; 
-        if origin_plot_counter == buf_size
-            origin_plot_counter = 0 ;
-            x = origin_plot_buffer(:,1) ;
-            y = origin_plot_buffer(:,2) ;
-            plot(handles.origin_axes,x, y) ;
-            set(handles.origin_axes, 'XGrid','on')
-            set(handles.origin_axes, 'YGrid','on')
-            fft_y = fftshift(abs(fft(y, 1024))) ;
-            plot(handles.fft_axes,1:1024, mapminmax(fft_y,0,1)) ;
-            set(handles.fft_axes, 'XGrid','on')
-            set(handles.fft_axes, 'YGrid','on')
-        end
+cmd_data_name = 'data' ;
+data_str = rev_text(length(cmd_data_name)+1:end) ;
+data_vector = zeros(1,length(var_names)) ;
+data_cell = regexp(data_str,'\d*\.?\d*','match') ;
+len_cell = length(data_cell) ;
+for i = 1:len_cell % why plus 1 ? i dont know but seems right
+    data_vector(i) = str2double(data_cell{i}) ;
+end
+if origin_plot_counter < buf_size
+    origin_plot_counter = origin_plot_counter+1 ;
+    origin_plot_buffer(origin_plot_counter,:) = data_vector(:) ;
+    if origin_plot_counter == buf_size
+        origin_plot_counter = 0 ;
+        x = origin_plot_buffer(:,1) ;
+        y = origin_plot_buffer(:,2) ;
+        plot(handles.origin_axes,x, y) ;
+        set(handles.origin_axes, 'XGrid','on')
+        set(handles.origin_axes, 'YGrid','on')
+        fft_y = fftshift(abs(fft(y, 1024))) ;
+        plot(handles.fft_axes,1:1024, mapminmax(fft_y,0,1)) ;
+        set(handles.fft_axes, 'XGrid','on')
+        set(handles.fft_axes, 'YGrid','on')
     end
 end
-
-if isSpecifyVarName == false
-    cmd_specify_name = 'cmd-specify' ;
-    cmd_specify_flag = strfind(rev_text, cmd_specify_name) ;
-    if cmd_specify_flag >= 1
-        specify_contents = rev_text(length(cmd_specify_name)+1:end) ;
-        extractPacketVarNames(specify_contents) ;
-        fmt_str = '' ;
-        for i = 1:length(var_names)
-            part_str = var_names{i} ;
-            fmt_str = [fmt_str,'"',part_str,'"',','] ;
-        end
-        fmt_str = fmt_str(1:end-1) ;
-        set(handles.fmt_text, 'string', fmt_str) ;
-        isSpecifyVarName = true ;
-    end
-end % get var names and show it in Command Format
-if isSpecifyCSVName == false
-    cmd_csv_name = 'cmd-csv' ;
-    cmd_csv_flag = strfind(rev_text, cmd_csv_name) ;
-    if cmd_csv_flag >= 1
-        csv_contents = rev_text(length(cmd_csv_name)+1:end) ;
-        loc_1 = strfind(csv_contents, '"') ;
-        new_str = csv_contents(loc_1+1:end) ;
-        loc_2 = strfind(new_str, '"') ;
-        csv_file_name = new_str(1:loc_2-1) ;
-        isSpecifyCSVName = true ;
-        csv_show_name = ['data save as csv file, named = ',csv_file_name,'.csv'] ;
-        set(handles.csv_name_text, 'string', csv_show_name) ;
-    end
-end % get csv files name and save it to create csv file 
 
 
 % --- Executes on button press in pbClosePort.
@@ -302,11 +266,27 @@ function pbClosePort_Callback(hObject, eventdata, handles)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 global s_handler
+global rev_data_counter
+global csv_file_name
 fclose(s_handler) ;
 delete(s_handler)
 set(handles.pbOpenPort, 'Enable', 'on') ;
 set(handles.pbClosePort, 'Enable', 'off') ;
-fprintf('close serial port') ;
+clc
+display('close serial port now') ;
+axes(handles.origin_axes) 
+cla reset
+set(handles.origin_axes, 'XGrid','on')
+set(handles.origin_axes, 'YGrid','on')
+axes(handles.fft_axes) 
+cla reset
+set(handles.fft_axes, 'XGrid','on')
+set(handles.fft_axes, 'YGrid','on')
+rev_data_counter = 0 ;
+count = ['rev count = ', num2str(rev_data_counter)] ;
+set(handles.rev_count_text, 'string', count) ;
+% save data into csv
+csv_file_name = 'serial_csv_data.csv' ;
 
 
 % --- Executes on selection change in menu_serialport.
@@ -336,20 +316,6 @@ switch val
         COM_PORT = 'COM6' ;
 end
 
-
-% --- Executes during object creation, after setting all properties.
-function menu_serialport_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to menu_serialport (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: popupmenu controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-
-
 % --- Executes on selection change in menu_baudrate.
 function menu_baudrate_Callback(hObject, eventdata, handles)
 % hObject    handle to menu_baudrate (see GCBO)
@@ -373,19 +339,6 @@ switch val
     case 5
         COM_RATE = 115200 ;
 end
-
-% --- Executes during object creation, after setting all properties.
-function menu_baudrate_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to menu_baudrate (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: popupmenu controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-
 
 % --- Executes on button press in pd_send.
 function pd_send_Callback(hObject, eventdata, handles)
@@ -417,31 +370,10 @@ global sending_text
 sending_text = get(hObject, 'String') ; % get the sending text contents
 
 
-% --- Executes during object creation, after setting all properties.
-function edit_send_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to edit_send (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
 
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-
-
-% --- Executes during object creation, after setting all properties.
-function origin_axes_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to origin_axes (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: place code in OpeningFcn to populate origin_axes
-
-
-% --- Executes on button press in r_button.
-function r_button_Callback(hObject, eventdata, handles)
-% hObject    handle to r_button (see GCBO)
+% --- Executes on button press in sending_newline.
+function sending_newline_Callback(hObject, eventdata, handles)
+% hObject    handle to sending_newline (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 global isSendingNewLine
@@ -451,140 +383,7 @@ if val == 1
 else
     isSendingNewLine = false ;
 end
-% Hint: get(hObject,'Value') returns toggle state of r_button
-
-
-
-function CmdFormat_edit_Callback(hObject, eventdata, handles)
-% hObject    handle to CmdFormat_edit (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hints: get(hObject,'String') returns contents of CmdFormat_edit as text
-%        str2double(get(hObject,'String')) returns contents of CmdFormat_edit as a double
-
-
-% --- Executes during object creation, after setting all properties.
-function CmdFormat_edit_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to CmdFormat_edit (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-
-
-
-function rev_edit_Callback(hObject, eventdata, handles)
-% hObject    handle to rev_edit (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hints: get(hObject,'String') returns contents of rev_edit as text
-%        str2double(get(hObject,'String')) returns contents of rev_edit as a double
-global rev_text
-global s_handler
-
-
-% --- Executes during object creation, after setting all properties.
-function rev_edit_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to rev_edit (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-
-
-% --- Executes during object creation, after setting all properties.
-function rev_text_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to rev_text (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-
-% --- Executes on slider movement.
-function slider1_Callback(hObject, eventdata, handles)
-% hObject    handle to slider1 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hints: get(hObject,'Value') returns position of slider
-%        get(hObject,'Min') and get(hObject,'Max') to determine range of slider
-
-
-% --- Executes during object creation, after setting all properties.
-function slider1_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to slider1 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: slider controls usually have a light gray background.
-if isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor',[.9 .9 .9]);
-end
-
-
-% --- Executes on selection change in rev_text.
-function rev_text_Callback(hObject, eventdata, handles)
-% hObject    handle to rev_text (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hints: contents = cellstr(get(hObject,'String')) returns rev_text contents as cell array
-%        contents{get(hObject,'Value')} returns selected item from rev_text
-
-
-% --- Executes on selection change in rev_list.
-function rev_list_Callback(hObject, eventdata, handles)
-% hObject    handle to rev_list (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hints: contents = cellstr(get(hObject,'String')) returns rev_list contents as cell array
-%        contents{get(hObject,'Value')} returns selected item from rev_list
-
-
-% --- Executes during object creation, after setting all properties.
-function rev_list_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to rev_list (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: listbox controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-
-global inform
-global rev_data_counter
-inform = {} ;
-rev_data_counter = 0 ;
-
-
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-
-
-% --- Executes on button press in csv_button.
-function csv_button_Callback(hObject, eventdata, handles)
-% hObject    handle to csv_button (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hint: get(hObject,'Value') returns toggle state of csv_button
-global isCreateCSVFiles
-val = get(hObject, 'Value') ;
-if val == 1
-    isCreateCSVFiles = true ;
-else
-    isCreateCSVFiles = false ;
-end
+% Hint: get(hObject,'Value') returns toggle state of sending_newline
 
 
 % --- Executes during object creation, after setting all properties.
@@ -632,8 +431,59 @@ if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgr
 end
 
 
+
+function csv_name_Callback(hObject, eventdata, handles)
+% hObject    handle to csv_name (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hints: get(hObject,'String') returns contents of csv_name as text
+%        str2double(get(hObject,'String')) returns contents of csv_name as a double
+global csv_file_name
+csv_file_name = get(hObject, 'string') ;
+
+
 % --- Executes during object creation, after setting all properties.
-function csv_name_text_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to csv_name_text (see GCBO)
+function csv_name_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to csv_name (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+
+
+function cmd_specify_edit_Callback(hObject, eventdata, handles)
+% hObject    handle to cmd_specify_edit (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hints: get(hObject,'String') returns contents of cmd_specify_edit as text
+%        str2double(get(hObject,'String')) returns contents of cmd_specify_edit as a double
+global cmd_specify_fmt
+cmd_specify_fmt = get(hObject, 'String') ;
+
+% --- Executes during object creation, after setting all properties.
+function cmd_specify_edit_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to cmd_specify_edit (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+
+% --- Executes during object creation, after setting all properties.
+function origin_axes_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to origin_axes (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: place code in OpeningFcn to populate origin_axes
