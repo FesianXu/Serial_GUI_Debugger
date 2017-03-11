@@ -64,6 +64,7 @@ global isOrigin_buffer_init
 global SerialInputBufferSize
 global cmd_specify_fmt
 global csv_file_name
+global csv_file_handle
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % --- Executes just before test is made visible.
 function test_OpeningFcn(hObject, eventdata, handles, varargin)
@@ -163,9 +164,10 @@ global COM_PORT
 global COM_RATE
 global s_handler
 global SerialInputBufferSize
-global cmd_specify_fmt
 global cmd_specify_edit
 global var_names
+global csv_file_name
+global csv_file_handle
 clc
 instrreset  % inconnect and delete all instrument objects
 s_handler = serial(COM_PORT) ;
@@ -188,6 +190,27 @@ if cmd_specify_flag >= 1
     specify_contents = cmd_specify_edit(length(cmd_specify_name)+1:end) ;
     extractPacketVarNames(specify_contents) ;
 end
+% save data into csv
+csv_file_name = get(handles.csv_name, 'string') ;
+if isempty(csv_file_name)
+    csv_file_name = 'serial_csv_data.csv' ;
+end
+var_str = '' ;
+delete(csv_file_name) ;
+tmp = fopen(csv_file_name,'w') ;
+fclose(tmp) ; % create file named $csv_file_name
+csv_file_handle = fopen(csv_file_name,'w') ;
+for i = 1:length(var_names)
+    var_str = var_names{i} ;
+    if i ~= length(var_names)
+        fprintf(csv_file_handle, '%s,',char(var_str)) ;
+    else
+        fprintf(csv_file_handle,'%s',char(var_str)) ;
+    end
+end
+fprintf(csv_file_handle,'\r') ;
+
+
 
 function extractPacketVarNames(var_contents)
 global var_names
@@ -222,6 +245,7 @@ global origin_plot_buffer
 global isOrigin_buffer_init 
 global origin_plot_counter 
 global buffer_size
+global csv_file_handle
 buffer_size = get(handles.buf_edit, 'string') ;
 buf_size = str2double(buffer_size) ;
 rev_text = fscanf(s_handler) ;
@@ -239,9 +263,15 @@ data_str = rev_text(length(cmd_data_name)+1:end) ;
 data_vector = zeros(1,length(var_names)) ;
 data_cell = regexp(data_str,'\d*\.?\d*','match') ;
 len_cell = length(data_cell) ;
-for i = 1:len_cell % why plus 1 ? i dont know but seems right
+for i = 1:len_cell 
     data_vector(i) = str2double(data_cell{i}) ;
+    if i ~= len_cell
+        fprintf(csv_file_handle, '%f,',data_vector(i));
+    else
+        fprintf(csv_file_handle, '%f',data_vector(i)) ;
+    end
 end
+fprintf(csv_file_handle,'\r') ;
 if origin_plot_counter < buf_size
     origin_plot_counter = origin_plot_counter+1 ;
     origin_plot_buffer(origin_plot_counter,:) = data_vector(:) ;
@@ -268,11 +298,13 @@ function pbClosePort_Callback(hObject, eventdata, handles)
 global s_handler
 global rev_data_counter
 global csv_file_name
+global csv_file_handle
+fclose(csv_file_handle);
 fclose(s_handler) ;
-delete(s_handler)
+delete(s_handler) ;
 set(handles.pbOpenPort, 'Enable', 'on') ;
 set(handles.pbClosePort, 'Enable', 'off') ;
-clc
+% clc
 display('close serial port now') ;
 axes(handles.origin_axes) 
 cla reset
@@ -285,8 +317,7 @@ set(handles.fft_axes, 'YGrid','on')
 rev_data_counter = 0 ;
 count = ['rev count = ', num2str(rev_data_counter)] ;
 set(handles.rev_count_text, 'string', count) ;
-% save data into csv
-csv_file_name = 'serial_csv_data.csv' ;
+
 
 
 % --- Executes on selection change in menu_serialport.
